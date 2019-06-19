@@ -7,6 +7,7 @@ import boto3
 
 # constants
 queue_url = 'https://sqs.us-east-1.amazonaws.com/263120685370/HCA-tasks'
+path_to_file = '/Users/litaochen/OneDrive/Projects/HCA_cloud_native/example_data/'
 
 
 # parse the metadata and return a list of dictionaries ready to save as csv
@@ -39,10 +40,10 @@ def parse_metadata_file(path_to_xml_doc):
                 "Column_Number": column,
                 "Well_Location": well,
                 "Field_Index": field,
-                URL_title: filename
+                URL_title: "file:" + path_to_file + filename
             }
         else:
-            groups[group_id][URL_title] = filename
+            groups[group_id][URL_title] = "file:" + path_to_file + filename
 
     rows = []
     for key, val in groups.items():
@@ -93,7 +94,6 @@ def count_tasks_in_queue():
     print(response)
 
 
-
 # write rows to csv file and submit to sqs, each file contains groups from the same well
 # args:
 #   - rows: a list of dict, each dict is one row of the image list,
@@ -103,6 +103,9 @@ def create_tasks(rows, output_path):
     print("splitting job into tasks:")
     current_well = ""
     rows_for_task = []
+
+    # add a dummy row to flush the last well
+    rows.append({"Well_Location": "dummy"})
     for row in rows:
         if row['Well_Location'] != current_well:
             if current_well != "":
