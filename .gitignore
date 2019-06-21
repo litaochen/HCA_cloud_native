@@ -2,3 +2,4 @@
 *.xdce
 example_data
 .settings
+.vscode

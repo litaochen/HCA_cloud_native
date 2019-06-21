@@ -5,9 +5,31 @@ import os
 import json
 import boto3
 
-# constants
+from .data_selector import find_by_extension
+
+# constants for dev
+# will be converted into arguments later
 queue_url = 'https://sqs.us-east-1.amazonaws.com/263120685370/HCA-tasks'
-path_to_file = '/Users/litaochen/OneDrive/Projects/HCA_cloud_native/example_data/'
+input = {
+    'image_data': {
+        's3_bucket': 'hca-cloud-native', 
+        'prefix': 'example_data/'
+    },
+    'pipeline_file': {
+        's3_bucket': 'hca-cloud-native', 
+        'key': 'pipeline_files/test.cppipe' 
+    }
+}
+
+# the location to store the analysis result
+# sub-dir structure will be created to save result from each taks
+output_directory = {
+    's3_bucket': 'hca-cloud-native',
+    'prefix': 'analysis_result/'
+}
+
+# the job id. It is part of the output directory structure
+job_id = "20190621_ABC123"
 
 
 # parse the metadata and return a list of dictionaries ready to save as csv
@@ -40,10 +62,10 @@ def parse_metadata_file(path_to_xml_doc):
                 "Column_Number": column,
                 "Well_Location": well,
                 "Field_Index": field,
-                URL_title: "file:" + path_to_file + filename
+                URL_title: "file:" + path_to_xml_doc + filename
             }
         else:
-            groups[group_id][URL_title] = "file:" + path_to_file + filename
+            groups[group_id][URL_title] = "file:" + path_to_xml_doc + filename
 
     rows = []
     for key, val in groups.items():
@@ -99,6 +121,10 @@ def count_tasks_in_queue():
 #   - rows: a list of dict, each dict is one row of the image list,
 #         contains images from the same well, same field
 #   - output_path: the path to save the csv files
+#   - each task will have individual directory for the image list and output
+#   - a post-processing lambda will combine the output to sigle result file later
+
+# todo: use boto3 to save the file to S3 (local -> S3)
 def create_tasks(rows, output_path):
     print("splitting job into tasks:")
     current_well = ""
@@ -127,9 +153,48 @@ def create_tasks(rows, output_path):
         rows_for_task.append(row)
 
 
-def submit_job(xml_doc, output_path):
-    rows = parse_metadata_file(xml_doc)
-    create_tasks(rows, output_path)
+# helper function to download file to local disk
+# here is mainly used to download the metadata file
+#   args:
+#   - the_bucket: the s3 bucket where the file is stored
+#   - the_key:   the key of the file to download
+#   - destination:  the location to save the file. For Lambda, it is /tmp
+#   - it will return the path to the file on local disk
+def download_from_s3(the_bucket, the_key, destination):
+    s3 = boto3.client('s3')
+
+    filename = the_key.split('/')[-1]
+    saved_as = destination + filename
+
+    with open(saved_as, 'wb') as data:
+        s3.download_fileobj(the_bucket, the_key, data)
+
+    return saved_as
+
+# parse and submit job request
+# args:
+#   - input: a dict describes the input dir in s3 bucket, pipeline file
+#   - metadata_file_extension: the extention of  the metadata file: "xdce", no dot.
+#   - output_path: a dict describes the output dir in s3 bucket
+#                  certain dir structure will be created to hold output from each job
+def submit_job(input, metadata_file_extention, output_path):
+    s3 = boto3.client('s3')
+
+    the_bucket = input['image_data']['s3_bucket']
+    the_prefix = input['image_data']['prefix']
+    
+
+
+# find the metadata file first
+    metadata_file_key = find_by_extension(the_bucket, the_prefix, metadata_file_extention)
+
+#  download the metadata file to /tmp (will be more efficient when the file is big)
+# /tmp is guaranteed to be available during the execution of your Lambda function
+    local_copy = download_from_s3(the_bucket, metadata_file_key, "/tmp")
+    rows = parse_metadata_file(local_copy)
+
+# save individual image file list by well and add to queue
+    create_tasks(rows, output_path + job_id + "/")
 
     count_tasks_in_queue()
 
@@ -157,3 +222,11 @@ if __name__ == '__main__':
     output_path = sys.argv[2]
 
     submit_job(xml_doc, output_path)
+
+
+# test the procrdure:
+#   - read metadata from input dir ".xdce file"
+#   - write file list to to the output dir
+#   - submit taks to sqs
+#   - check number of tasks in sqs
+

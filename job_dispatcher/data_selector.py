@@ -28,8 +28,9 @@ def get_content_in_dir(the_bucket, the_prefix):
 
 
 # check if certain file type exists in current dir
-# mainly used to check if the metadata file ".xdce" exists.
-def check_file_type_exist(bucket, the_prefix, file_extension):
+# mainly used to check if the metadata file "xdce" exists.
+# if find the file, return the key of the file
+def find_by_extension(bucket, the_prefix, file_extension):
     kwargs = {'Bucket': bucket, 'Prefix': the_prefix, 'Delimiter': '/'}
 
     while True:
@@ -38,22 +39,20 @@ def check_file_type_exist(bucket, the_prefix, file_extension):
             raise KeyError("this directory does not exist: " + the_prefix)
 
         for obj in response['Contents']:
-            if obj['Key'][-4:] == file_extension:
-                return True
+            if obj['Key'].split['.'][-1] == file_extension:
+                return obj['Key']
 
         try:
             kwargs['ContinuationToken'] = response['NextContinuationToken']
         except KeyError:
-            break
-
-    return False
+            return None
 
 
 # test
 try:
     # test list file / dir function
-    print(get_content_in_dir("hca-cloud-native", "pipeline_files/"))
+    print(get_content_in_dir("hca-cloud-native", "example_data/"))
 
-    print(check_file_type_exist("hca-cloud-native", "example_data/", "xdce"))
+    # print(find_by_extension("hca-cloud-native", "example_data/", "xdce"))
 except KeyError as error:
     print(error)
