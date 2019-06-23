@@ -13,25 +13,43 @@ import s3worker
 #   - job_id: the unique job id for current job request
 #   - input: a dict describes the input dir in s3 bucket, pipeline file
 #   - metadata_file_extension: the extention of  the metadata file: "xdce", no dot.
-#   - job_record_dir: a dict describes the output dir in s3 bucket
+#   - job_record_dir: a dict describes the dir to store run related into in s3 bucket
 #                  certain dir structure will be created to hold output from each job
 
+# example job_request:
+# job_request = {
+#     'sqs_url': 'https://sqs.us-east-1.amazonaws.com/263120685370/HCA-tasks',
+#     'image_data': {
+#         's3_bucket': 'hca-cloud-native',
+#         'prefix': 'example_data/'
+#     },
+#     'pipeline_file': {
+#         's3_bucket': 'hca-cloud-native',
+#         'key': 'pipeline_files/test.cppipe'
+#     },
+#     'job_record_dir': {
+#           's3_bucket': 'hca-cloud-native',
+#           'prefix': 'analysis_result/'
+#       }
+# }
 
-def submit_job(job_id, input, metadata_file_extention, job_record_dir):
+def submit_job(job_id, job_request, metadata_file_extention):
     s3 = boto3.client('s3')
+    sqs = boto3.client('sqs')
 
-    the_bucket = input['image_data']['s3_bucket']
-    the_prefix = input['image_data']['prefix']
+    the_bucket = job_request['image_data']['s3_bucket']
+    the_prefix = job_request['image_data']['prefix']
 
     # check if output_path has "/" at the end, if not, add one
-    if job_record_dir[-1:] != '/':
-        the_valid_job_record_dir = job_record_dir + '/'
+    if job_request['job_record_dir']['prefix'][-1:] != '/':
+        the_valid_job_record_dir = job_request['job_record_dir']['prefix'] + '/'
     else:
-        the_valid_job_record_dir = job_record_dir
+        the_valid_job_record_dir = job_request['job_record_dir']['prefix']
 
     input_file_prefix = the_valid_job_record_dir + job_id + "/input/"
+    output_file_prefix = the_valid_job_record_dir + job_id + "/output/"
 
-# find the metadata file first
+    # find the metadata file first
     metadata_files = s3worker.find_by_extension(
         s3, the_bucket, the_prefix, metadata_file_extention)
     try:
@@ -42,25 +60,48 @@ def submit_job(job_id, input, metadata_file_extention, job_record_dir):
         raise e
 
     metadata_file = metadata_files[0]
-#  download the metadata file to /tmp (will be more efficient when the file is big)
-# /tmp is guaranteed to be available during the execution of your Lambda function
+    #  download the metadata file to /tmp (will be more efficient when the file is big)
+    # /tmp is guaranteed to be available during the execution of your Lambda function
     local_copy = s3worker.download_file(
         s3, the_bucket, metadata_file, '/tmp')
 
-    rows = parse_metadata_file(local_copy)
+    rows = parse_metadata_file(local_copy, job_request['image_data']['prefix'])
 
-# save individual image file list by well and add to queue
-    create_tasks(s3, the_bucket, job_id, rows, input_file_prefix)
+    # build the template of the task
+    # the missing pieces will be added by "create_task" function
+    task_template = {
+        "job_id": job_id,
+        "task_id": "TO_BE_ADDED",
+        "image_data_bucket": job_request['image_data']['s3_bucket'],
+        "pipeline_file": job_request['pipeline_file'],
+        "job_record_bucket": job_request['job_record_dir']['s3_bucket'],
+        "task_input_dir": input_file_prefix,
+        "task_output_dir": output_file_prefix,
+        "file_list_key": "TO_BE_ADDED"
+    }
+
+    # save individual image file list by well and add to queue
+    create_tasks(s3, task_template, rows, sqs, job_request['sqs_url'])
 
     count_tasks_in_queue()
 
 
-# parse the metadata and return a list of dictionaries ready to save as csv
+# parse the metadata and return a list of dictionaries ready to save as file list csv
 # args:
-#   - path_to_xml_doc: the path to the xdce file
+#   - metadata_file: the path to the local copy of the metadat file
+#   - image_prefix: the prefix to the images in S3 bucket.
+#                   The prefix will be added to the image path
+#                   The worker will mount S3 bucket as local storage and access images through the prefix
+#                   The bucket info exists in the task message, not here.
 #   - returns: a list of dictionaries ready to save as csv
-def parse_metadata_file(path_metadata_file):
-    tree = ET.parse(path_metadata_file)
+def parse_metadata_file(metadata_file, image_prefix):
+    # check if image_prefix ends with '/'. if not, add it
+    if image_prefix[-1:] != '/':
+        valid_image_prefix = image_prefix + '/'
+    else:
+        valid_image_prefix = image_prefix
+
+    tree = ET.parse(metadata_file)
     root = tree.getroot()
     groups = {}
 
@@ -83,11 +124,11 @@ def parse_metadata_file(path_metadata_file):
                 "Column_Number": column,
                 "Well_Location": well,
                 "Field_Index": field,
-                URL_title: "file:" + path_metadata_file + filename
+                URL_title: "file:" + valid_image_prefix + filename
             }
         else:
             groups[group_id][URL_title] = "file:" + \
-                path_metadata_file + filename
+                metadata_file + filename
 
     rows = []
     for key, val in groups.items():
@@ -95,25 +136,35 @@ def parse_metadata_file(path_metadata_file):
     return rows
 
 
-# write rows to csv file and submit to sqs, each file contains groups from the same well
+# write rows to csv file, submit to S3 and sqs, each file contains groups from the same well
 # args:
 #   -s3_client: the s3 client used to interact with S3 bucket
 #   -the_bucket: the S3 bucket to save the file list
-#   -job_id: the job id. Will be written in the message to worker.
+#   -task_template: the message template to enqueue to sqs
 #   - rows: a list of dict, each dict is one row of the image list,
 #         contains images from the same well, same field
-#   - input_file_prefix: the path to save the csv files as task input
 #   - each task will have individual directory for the image list and output
 #   - a post-processing lambda will combine the output to sigle result file later
 
-# todo: use boto3 to save the file to S3 (local -> S3)
-def create_tasks(s3_client, the_bucket, the_job_id, rows, input_file_prefix):
+# task template:
+    # task_template = {
+    #     "job_id": job_id,
+    #     "task_id": "TO_BE_ADDED",
+    #     "job_record_bucket": job_request['job_record_dir']['s3_bucket'],
+    #     "task_input_dir": input_file_prefix,
+    #     "task_output_dir": output_file_prefix,
+    #     "file_list_key": "TO_BE_ADDED",
+    #     "pipeline_file": job_request['pipeline_file']
+    # }
+
+def create_tasks(s3_client, task_template, rows,
+                 sqs_client, QueueUrl):
     # the input_file_prefix should have "/" at the end
     # if not, add it
-    if input_file_prefix[-1:] != '/':
-        the_valid_input_file_prefix = input_file_prefix + '/'
+    if task_template['task_input_dir'][-1:] != '/':
+        the_valid_input_file_prefix = task_template['task_input_dir'] + '/'
     else:
-        the_valid_input_file_prefix = input_file_prefix
+        the_valid_input_file_prefix = task_template['task_input_dir']
 
     current_well = ""
     rows_for_task = []
@@ -124,28 +175,24 @@ def create_tasks(s3_client, the_bucket, the_job_id, rows, input_file_prefix):
         if row['Well_Location'] != current_well:
             # one well is done. save to local file under "/tmp" and upload to S3
             if current_well != "":
-                local_file = '/tmp/' + the_job_id + '-' + current_well + '.csv'
+                local_file = '/tmp/' + \
+                    task_template['job_id'] + '-' + current_well + '.csv'
                 file_list_key = the_valid_input_file_prefix + \
                     current_well + '/' + current_well + ".csv"
 
                 save_to_csv(rows_for_task, local_file)
                 s3worker.upload_file(s3_client, local_file,
-                                     the_bucket, file_list_key)
+                                     task_template['job_record_bucket'], file_list_key)
                 os.remove(local_file)
                 rows_for_task = []
 
-                # enqueue the task
-                message = json.dumps({
-                    "job_id": the_job_id,
-                    "task_id": current_well,
-                    "file_list": {
-                        "bucket": the_bucket,
-                        "file_list_key": file_list_key
-                    },
-                    "pipeline_file": "path_to_pipeline_file",
-                    "output_dir": input_file_prefix
-                })
-                enqueue_task(message)
+                # compplete and enqueue the task
+                the_task = task_template.copy()
+                the_task['task_id'] = current_well
+                the_task['file_list_key'] = file_list_key
+
+                message = json.dumps(the_task)
+                enqueue_task(sqs_client, message)
 
             current_well = row['Well_Location']
         rows_for_task.append(row)
@@ -166,12 +213,14 @@ def save_to_csv(rows, filename):
 
 
 # submit message to aws sqs
-def enqueue_task(message):
-    client = boto3.client('sqs')
-
+# args:
+#   - sqs_client: the sqs client to interact with sqs
+#   - QueueUrl: the queue url
+#   - message: the message to enqueue
+def enqueue_task(sqs_client, message):
     # send a message
     print("sending the message..")
-    response = client.send_message(
+    response = sqs_client.send_message(
         QueueUrl=queue_url,
         MessageBody=message,
     )
@@ -203,7 +252,13 @@ def count_tasks_in_queue():
 # constants for dev
 # will be converted into arguments later
 queue_url = 'https://sqs.us-east-1.amazonaws.com/263120685370/HCA-tasks'
+job_record_dir = {
+    's3_bucket': 'hca-cloud-native',
+    'prefix': 'analysis_result/'
+}
+
 input = {
+    'sqs_url': queue_url,
     'image_data': {
         's3_bucket': 'hca-cloud-native',
         'prefix': 'example_data/'
@@ -211,18 +266,16 @@ input = {
     'pipeline_file': {
         's3_bucket': 'hca-cloud-native',
         'key': 'pipeline_files/test.cppipe'
-    }
+    },
+    'job_record_dir': job_record_dir
 }
 
 # the location to store the analysis result
 # sub-dir structure will be created to save result from each taks
-output_directory = {
-    's3_bucket': 'hca-cloud-native',
-    'prefix': 'analysis_result/'
-}
+
 
 # the job id. It is part of the output directory structure
 job_id = "20190621_ABC123"
 
 
-submit_job(job_id, input, 'xdce', 'analysis_result/')
+submit_job(job_id, input, 'xdce')
