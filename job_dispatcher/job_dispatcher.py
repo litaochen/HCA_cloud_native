@@ -257,7 +257,7 @@ job_record_dir = {
     'prefix': 'analysis_result/'
 }
 
-input = {
+job_request = {
     'sqs_url': queue_url,
     'image_data': {
         's3_bucket': 'hca-cloud-native',
@@ -278,4 +278,4 @@ input = {
 job_id = "20190621_ABC123"
 
 
-submit_job(job_id, input, 'xdce')
+submit_job(job_id, job_request, 'xdce')
