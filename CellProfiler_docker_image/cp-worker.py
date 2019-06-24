@@ -78,6 +78,14 @@ def printandlog(text, logger):
 #################################
 
 
+# order of actions:
+# - get task message from the queue
+# - mount image data bucket
+# - download image flie list and pipeline file
+# - start the work and log outout
+# - upload output back to S3
+# - unmount image data bucket and clean up files
+
 def runCellProfiler(message):
     # List the directories in the bucket- this prevents a strange s3fs error
     rootlist = os.listdir(DATA_ROOT)
