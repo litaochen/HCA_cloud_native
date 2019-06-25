@@ -15,13 +15,13 @@ import string
 # CONSTANT PATHS IN THE CONTAINER
 #################################
 
-DATA_ROOT = '/home/ubuntu/bucket'
-LOCAL_OUTPUT = '/home/ubuntu/local_output'
-QUEUE_URL = os.environ['SQS_QUEUE_URL']
-AWS_BUCKET = os.environ['AWS_BUCKET']
-LOG_GROUP_NAME = os.environ['LOG_GROUP_NAME']
-CHECK_IF_DONE_BOOL = os.environ['CHECK_IF_DONE_BOOL']
-EXPECTED_NUMBER_FILES = os.environ['EXPECTED_NUMBER_FILES']
+IMAGE_DATA_BUCKET = os.environ['IMAGE_DATA_BUCKET']
+TASK_INPUT_DIR = os.environ['TASK_INPUT_DIR']
+TASK_OUTPUT_DIR = os.environ['TASK_OUTPUT_DIR']
+
+QUEUE_URL = os.environ['SQS_URL']
+LOG_GROUP_NAME = os.environ['CLOUDWATCH_LOG_GROUP_NAME']
+LOG_STREAM_NAME = os.environ['CLOUDWATCH_LOG_STREAM_NAME']
 
 #################################
 # CLASS TO HANDLE THE SQS QUEUE
@@ -86,6 +86,7 @@ def printandlog(text, logger):
 # - upload output back to S3
 # - unmount image data bucket and clean up files
 
+
 def runCellProfiler(message):
     # List the directories in the bucket- this prevents a strange s3fs error
     rootlist = os.listdir(DATA_ROOT)
@@ -98,54 +99,6 @@ def runCellProfiler(message):
     logger = logging.getLogger(__name__)
 
     # Prepare paths and parameters
-    # support for cellprofiler --print-groups output
-    if type(message['Metadata']) == dict:
-        if message['output_structure'] == '':
-            watchtowerlogger = watchtower.CloudWatchLogHandler(log_group=LOG_GROUP_NAME, stream_name=str(
-                message['Metadata'].values()), create_log_group=False)
-            logger.addHandler(watchtowerlogger)
-            printandlog(
-                'You must specify an output structure when passing Metadata as dictionaries', logger)
-            logger.removeHandler(watchtowerlogger)
-            return 'INPUT_PROBLEM'
-        else:
-            metadataID = message['output_structure']
-            metadataForCall = ''
-            for eachMetadata in message['Metadata'].keys():
-                if eachMetadata not in metadataID:
-                    watchtowerlogger = watchtower.CloudWatchLogHandler(log_group=LOG_GROUP_NAME, stream_name=str(
-                        message['Metadata'].values()), create_log_group=False)
-                    logger.addHandler(watchtowerlogger)
-                    printandlog(
-                        'Your specified output structure does not match the Metadata passed', logger)
-                else:
-                    metadataID = string.replace(
-                        metadataID, eachMetadata, message['Metadata'][eachMetadata])
-                    metadataForCall += eachMetadata+'=' + \
-                        message['Metadata'][eachMetadata]+','
-            message['Metadata'] = metadataForCall[:-1]
-    elif 'output_structure' in message.keys():
-        if message['output_structure'] != '':  # support for explicit output structuring
-            watchtowerlogger = watchtower.CloudWatchLogHandler(
-                log_group=LOG_GROUP_NAME, stream_name=message['Metadata'], create_log_group=False)
-            logger.addHandler(watchtowerlogger)
-            metadataID = message['output_structure']
-            for eachMetadata in message['Metadata'].split(','):
-                if eachMetadata.split('=')[0] not in metadataID:
-                    printandlog(
-                        'Your specified output structure does not match the Metadata passed', logger)
-                else:
-                    metadataID = string.replace(metadataID, eachMetadata.split('=')[
-                                                0], eachMetadata.split('=')[1])
-            printandlog('metadataID ='+metadataID, logger)
-        else:  # backwards compatability with 1.0.0 and/or no desire to structure output
-            # Strip equal signs from the metadata
-            metadataID = '-'.join([x.split('=')[1]
-                                   for x in message['Metadata'].split(',')])
-    else:  # backwards compatability with 1.0.0 and/or no desire to structure output
-        # Strip equal signs from the metadata
-        metadataID = '-'.join([x.split('=')[1]
-                               for x in message['Metadata'].split(',')])
 
     localOut = LOCAL_OUTPUT + '/%(MetadataID)s' % {'MetadataID': metadataID}
     remoteOut = os.path.join(message['output'], metadataID)
