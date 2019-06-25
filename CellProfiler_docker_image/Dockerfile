@@ -11,9 +11,9 @@ RUN apt-get update && yes | apt-get install curl s3fs
 # Install AWS CLI, boto3 and watchover
 RUN \
   pip  install \
-    awscli \
-    boto3 \
-    watchtower
+  awscli \
+  boto3 \
+  watchtower
 
 # SETUP NEW ENTRYPOINT
 
@@ -23,5 +23,6 @@ COPY cp-worker.py .
 COPY initialize-worker.sh .
 RUN chmod 755 initialize-worker.sh
 
-ENTRYPOINT ["/home/ubuntu/initialize-worker.sh"]
+ENTRYPOINT ["/bin/bash"]
+# ENTRYPOINT ["/home/ubuntu/initialize-worker.sh"]
 # CMD [""]

@@ -13,9 +13,11 @@ echo 'Cloudwatch log stream: $CLOUDWATCH_LOG_STREAM_NAME'
 echo 'Number of cores assigned: $NUM_CORES'
 
 # arguments created here and will be passed to CP worker
-export IMAGE_DATA_BUCKET='/home/ubuntu/image_data_bucket'
+echo "configuring local directories for processing tasks..."
+export IMAGE_DATA_BUCKET_DIR='/home/ubuntu/image_data_bucket'
 export TASK_INPUT_DIR='/home/ubuntu/task_input'
 export TASK_OUTPUT_DIR='/home/ubuntu/task_output'
+export S3FS_CREDENTIAL_FILE='/home/ubuntu/aws_credentials'
 
 
 # 1. CONFIGURE AWS CLI
@@ -39,20 +41,22 @@ fi
 #       task_output:       the place to hold analysis run output. Will be 
 
 echo "Preparing directories for S3 bucket mounting..."
-echo $AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY > /home/ubuntu/aws_credentials
+echo $AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY > "$S3FS_CREDENTIAL_FILE"
 chmod 600 /home/ubuntu/aws_credentials
-mkdir -p "$IMAGE_DATA_BUCKET"
-# mount by command: s3fs the-s3-bucket $IMAGE_DATA_BUCKET -o passwd_file=/home/ubuntu/aws_credentials
+mkdir -p "$IMAGE_DATA_BUCKET_DIR"
+# mount by command: s3fs the-s3-bucket $IMAGE_DATA_BUCKET -o passwd_file=$S3FS_CREDENTIAL_FILE
 # unmount by command: umount $IMAGE_DATA_BUCKET
 
 echo "setting up task input and output directories..."
 mkdir -p "$TASK_INPUT_DIR"
-mkdir -p "$TASK_INPUT_DIR"
+mkdir -p "$TASK_OUTPUT_DIR"
 
 # 3. RUN CP WORKERS. 
 echo "All set! Starting CP worker...."
-for((k=0; k<$NUM_CORES; k++)); do
-    python ./cp-worker.py |& tee $k.out &
-    sleep $SECONDS_TO_START
-done
-wait
+bash
+
+# for((k=0; k<$NUM_CORES; k++)); do
+#     python ./cp-worker.py |& tee $k.out &
+#     sleep $SECONDS_TO_START
+# done
+# wait
