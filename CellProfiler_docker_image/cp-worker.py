@@ -203,10 +203,8 @@ def build_cp_run_command():
     cmdstem = 'cellprofiler -c -r '
     cp_done_file = app_config['TASK_OUTPUT_DIR'] + '/done.txt'
 
-    input_path_to_image = "'" + app_config['IMAGE_DATA_BUCKET_DIR'] + "/" + task_config['image_data_prefix'] + "'"
     cp_run_command = (cmdstem + " -p " + "'" + task_config['pipeline_file_local_copy'] + "'" +
                         " --data-file=" + "'" + task_config['image_list_local_copy'] + "'" + 
-                        # " -i " + input_path_to_image + 
                         " -o " + "'" + app_config['TASK_OUTPUT_DIR'] + "'" + 
                         " -d " + "'" + cp_done_file) + "'"
     return cp_run_command    
