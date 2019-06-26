@@ -7,10 +7,10 @@ SECONDS_TO_START=30
 # arguments are passed into the container as environment variables
 echo "App: $APP_NAME"
 echo "Region: $AWS_REGION"
-echo 'SQS URL: $SQS_URL'
-echo 'Cloudwatch log group: $CLOUDWATCH_LOG_GROUP_NAME'
-echo 'Cloudwatch log stream: $CLOUDWATCH_LOG_STREAM_NAME'
-echo 'Number of cores assigned: $NUM_CORES'
+echo "SQS URL: $SQS_URL"
+echo "Cloudwatch log group: $CLOUDWATCH_LOG_GROUP_NAME"
+echo "Cloudwatch log stream: $CLOUDWATCH_LOG_STREAM_NAME"
+echo "Number of cores assigned: $NUM_CORES"
 echo "image data bucket dir: $IMAGE_DATA_BUCKET_DIR"
 
 # arguments created here and will be passed to CP worker

@@ -13,10 +13,10 @@ RUN \
   pip  install -U \
   awscli \
   boto3 \
-  watchtower
+  watchtower \
+  urllib3==1.21.1
 
 # SETUP NEW ENTRYPOINT
-
 RUN mkdir -p /home/ubuntu/
 WORKDIR /home/ubuntu
 COPY cp-worker.py .

@@ -89,16 +89,25 @@ def printandlog(text, logger):
 def main():
     queue = JobQueue(app_config['QUEUE_URL'])
     # Main loop. Keep reading messages while they are available in SQS
-    msg, handle = queue.readMessage()
-    if msg is not None:
-        prepare_for_task(msg)
-        cp_run_command = build_cp_run_command()
-        print('Start the analysis with command: ', cp_run_command)
-        os.system(cp_run_command)
-        # result = subprocess.check_output(cp_run_command.split(), stderr=subprocess.STDOUT)
-        # print(result)
+    while True:
+        print("getting next task")
+        msg, handle = queue.readMessage()
+        if msg is None:
+            break
+        if msg['task_id'][0] == 'A':
+            prepare_for_task(msg)
+            print("current task_id: " + task_config['task_id'])
+            cp_run_command = build_cp_run_command()
+            print('Start the analysis with command: ', cp_run_command)
+            os.system(cp_run_command)
+            queue.deleteMessage(handle)
+            # result = subprocess.check_output(cp_run_command.split(), stderr=subprocess.STDOUT)
+            # print(result)
 
-        upload_result_and_clean_up()
+            upload_result_and_clean_up()
+        else:
+            queue.deleteMessage(handle)
+            print("not column A, skipped")
        # run CP to process the images
        # upload result to s3 and clean up
 
@@ -135,8 +144,8 @@ def prepare_for_task(message):
 
     task_config['job_record_bucket'] = message['job_record_bucket']
     task_config['image_list_file_key'] = message['file_list_key']
-    task_config['task_input_prefix'] = message['task_input_dir']
-    task_config['task_output_prefix'] = message['task_output_dir']
+    task_config['task_input_prefix'] = message['task_input_prefix']
+    task_config['task_output_prefix'] = message['task_output_prefix']
 
     mount_s3_bucket_command = ("s3fs " + task_config['image_data_bucket'] + " " + app_config['IMAGE_DATA_BUCKET_DIR'] +
                                 " -o passwd_file=" + app_config['S3FS_CREDENTIAL_FILE'])
@@ -165,13 +174,15 @@ def upload_result_and_clean_up():
     s3 = boto3.client('s3')
 
     print(os.listdir(app_config['TASK_OUTPUT_DIR']))
-    upload_result_command = ("aws s3 mv " + app_config['TASK_OUTPUT_DIR'] + " s3://" +
-                              task_config['job_record_bucket'] + '/' + task_config['task_output_prefix'] +
-                              " --recursive" )
+    upload_result_command = ("aws s3 mv " + app_config['TASK_OUTPUT_DIR'] + 
+                            " \"s3://" +  task_config['job_record_bucket'] + '/' + task_config['task_output_prefix'] +
+                              "\" --recursive" )
+    print("moving data to S3 with command: \n" + upload_result_command)
     os.system(upload_result_command)
     print(os.listdir(app_config['TASK_OUTPUT_DIR']))
 
-    os.system('rm -r ' + app_config['TASK_OUTPUT_DIR'] + '/*')
+    if len(os.listdir(app_config['TASK_OUTPUT_DIR'])) != 0:
+        os.system('rm -r ' + app_config['TASK_OUTPUT_DIR'] + '/*')
     os.system("umount " + app_config['IMAGE_DATA_BUCKET_DIR'])
 
     #reset task-related config. To be sure does not affect previous run
