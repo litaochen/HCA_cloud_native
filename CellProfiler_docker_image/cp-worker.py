@@ -35,6 +35,7 @@ task_config = {}
 task_config['job_id'] = ''
 task_config['task_id'] = ''
 task_config['image_data_bucket'] = ''
+task_config['image_data_prefix'] = ''
 
 task_config['cp_pipeline_file_bucket'] = ''
 task_config['cp_pipeline_file_key'] = ''
@@ -43,6 +44,8 @@ task_config['job_record_bucket'] = ''
 task_config['image_list_file_key'] = ''
 task_config['task_input_prefix'] = ''
 task_config['task_output_prefix'] = ''
+task_config['image_list_local_copy'] = ''
+task_config['pipeline_file_local_copy'] = ''
 
 #################################
 # CLASS TO HANDLE THE SQS QUEUE
@@ -88,8 +91,14 @@ def main():
     # Main loop. Keep reading messages while they are available in SQS
     msg, handle = queue.readMessage()
     if msg is not None:
-       prepare_for_task(msg)
-       upload_result_and_clean_up()
+        prepare_for_task(msg)
+        cp_run_command = build_cp_run_command()
+        print('Start the analysis with command: ', cp_run_command)
+        os.system(cp_run_command)
+        # result = subprocess.check_output(cp_run_command.split(), stderr=subprocess.STDOUT)
+        # print(result)
+
+        upload_result_and_clean_up()
        # run CP to process the images
        # upload result to s3 and clean up
 
@@ -118,6 +127,8 @@ def prepare_for_task(message):
     task_config['job_id'] = message['job_id']
     task_config['task_id'] = message['task_id']
     task_config['image_data_bucket'] = message['image_data_bucket']
+    task_config['image_data_prefix'] = message['image_data_prefix']
+
 
     task_config['cp_pipeline_file_bucket'] = message['pipeline_file']['s3_bucket']
     task_config['cp_pipeline_file_key'] = message['pipeline_file']['key']
@@ -137,14 +148,13 @@ def prepare_for_task(message):
 
     s3 = boto3.client('s3')
     print("downloading image list...")
-    file_list_local = s3worker.download_file(s3, task_config['job_record_bucket'], 
+    task_config['image_list_local_copy'] = s3worker.download_file(s3, task_config['job_record_bucket'], 
                         task_config['image_list_file_key'], app_config['TASK_INPUT_DIR'])
-    os.system("ls -l " + "'" + file_list_local + "'")
 
     print("downloading pileline file...")
-    pipeline_file_local = s3worker.download_file(s3, task_config['cp_pipeline_file_bucket'], 
+    task_config['pipeline_file_local_copy'] = s3worker.download_file(s3, task_config['cp_pipeline_file_bucket'], 
                             task_config['cp_pipeline_file_key'], app_config['TASK_INPUT_DIR'])
-    os.system("ls -l " + "'" + pipeline_file_local + "'")
+
 
 # post processing after CellProfiler finish the analysis
 # it does the things below:
@@ -168,6 +178,32 @@ def upload_result_and_clean_up():
     for key, value in task_config.iteritems():
         task_config[key] = ''
 
+
+# construct CellProfiler run command 
+def build_cp_run_command():
+    cmdstem = ""
+    with open(task_config['pipeline_file_local_copy']) as openpipe:
+        for line in openpipe:
+            if 'DateRevision:2' in line:  
+                print('comes from a CP2 pipeline')
+                cmdstem = 'cellprofiler -c -r -b '
+                break
+
+    cmdstem = 'cellprofiler -c -r '
+    cp_done_file = app_config['TASK_OUTPUT_DIR'] + '/done.txt'
+
+    input_path_to_image = "'" + app_config['IMAGE_DATA_BUCKET_DIR'] + "/" + task_config['image_data_prefix'] + "'"
+    cp_run_command = (cmdstem + " -p " + "'" + task_config['pipeline_file_local_copy'] + "'" +
+                        " --data-file=" + "'" + task_config['image_list_local_copy'] + "'" + 
+                        # " -i " + input_path_to_image + 
+                        " -o " + "'" + app_config['TASK_OUTPUT_DIR'] + "'" + 
+                        " -d " + "'" + cp_done_file) + "'"
+    return cp_run_command    
+    # logger.info(cmd)
+
+    # subp = subprocess.Popen(
+    #     cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    # monitorAndLog(subp, logger)   
 
 
 def runCellProfiler(message):

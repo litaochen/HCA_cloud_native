@@ -11,10 +11,10 @@ echo 'SQS URL: $SQS_URL'
 echo 'Cloudwatch log group: $CLOUDWATCH_LOG_GROUP_NAME'
 echo 'Cloudwatch log stream: $CLOUDWATCH_LOG_STREAM_NAME'
 echo 'Number of cores assigned: $NUM_CORES'
+echo "image data bucket dir: $IMAGE_DATA_BUCKET_DIR"
 
 # arguments created here and will be passed to CP worker
 echo "configuring local directories for processing tasks..."
-export IMAGE_DATA_BUCKET_DIR='/home/ubuntu/image_data_bucket'
 export TASK_INPUT_DIR='/home/ubuntu/task_input'
 export TASK_OUTPUT_DIR='/home/ubuntu/task_output'
 export S3FS_CREDENTIAL_FILE='/home/ubuntu/aws_credentials'

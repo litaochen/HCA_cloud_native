@@ -73,6 +73,7 @@ def submit_job(job_id, job_request, metadata_file_extention):
         "job_id": job_id,
         "task_id": "TO_BE_ADDED",
         "image_data_bucket": job_request["image_data"]["s3_bucket"],
+        "image_data_prefix": job_request["image_data"]["prefix"],
         "pipeline_file": job_request["pipeline_file"],
         "job_record_bucket": job_request["job_record_dir"]["s3_bucket"],
         "task_input_dir": input_file_prefix,
@@ -95,6 +96,10 @@ def submit_job(job_id, job_request, metadata_file_extention):
 #                   The bucket info exists in the task message, not here.
 #   - returns: a list of dictionaries ready to save as csv
 def parse_metadata_file(metadata_file, image_prefix):
+    # the location where the images will appear in CP worker
+    # need to define here since CP requires the full path to the image in the file list. 
+    IMAGE_DATA_BUCKET_DIR = '/home/ubuntu/image_data_bucket/'
+
     # check if image_prefix ends with "/". if not, add it
     if image_prefix[-1:] != "/":
         valid_image_prefix = image_prefix + "/"
@@ -124,11 +129,10 @@ def parse_metadata_file(metadata_file, image_prefix):
                 "Column_Number": column,
                 "Well_Location": well,
                 "Field_Index": field,
-                URL_title: "file:" + valid_image_prefix + filename
+                URL_title: "file:" + IMAGE_DATA_BUCKET_DIR + valid_image_prefix + filename
             }
         else:
-            groups[group_id][URL_title] = "file:" + \
-                valid_image_prefix + filename
+            groups[group_id][URL_title] = "file:" + IMAGE_DATA_BUCKET_DIR + valid_image_prefix + filename
 
     rows = []
     for key, val in groups.items():
