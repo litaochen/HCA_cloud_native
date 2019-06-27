@@ -94,7 +94,7 @@ def main():
         msg, handle = queue.readMessage()
         if msg is None:
             break
-        if msg['task_id'][0] == 'A':
+        if msg['task_id'][0] == 'B':
             prepare_for_task(msg)
             print("current task_id: " + task_config['task_id'])
             cp_run_command = build_cp_run_command()
@@ -107,7 +107,7 @@ def main():
             upload_result_and_clean_up()
         else:
             queue.deleteMessage(handle)
-            print("not column A, skipped")
+            print("not column B, skipped")
        # run CP to process the images
        # upload result to s3 and clean up
 

@@ -1,6 +1,6 @@
 # the post run processor is used to consolidate run result from each individual tasks
 # and put the result into the final output dir of each job
-
+import os
 import boto3
 import s3worker
 import pandas as pd
@@ -51,6 +51,8 @@ def consolidate_and_upload(s3, result_file_groups, the_bucket, consolidated_data
         print("uploading consolidated result file to s3 bucket. file: " + combined_file_name)
         s3worker.upload_file(s3, combined_local_copy, the_bucket, consolidated_data_prefix + combined_file_name)
         print("uploading done")
+        os.system("rm /tmp/*")
+        print("directory \"/tmp\" cleared!")
 
 
 
