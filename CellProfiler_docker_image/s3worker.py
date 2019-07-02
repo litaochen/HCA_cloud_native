@@ -11,7 +11,7 @@ import boto3
 #   - num_items: number of item to retrieve, by default no limit.
 
 
-def get_content_in_dir(s3_client, the_bucket, the_prefix, max_items=None):
+def get_content_in_dir(s3_client, the_bucket, the_prefix, recursive=False, max_items=None):
     # check if prefix has "/" at the end, if not, add one
     if the_prefix[-1:] != '/':
         the_valid_prefix = the_prefix + '/'
@@ -20,9 +20,11 @@ def get_content_in_dir(s3_client, the_bucket, the_prefix, max_items=None):
 
     kwargs = {'Bucket': the_bucket,
               'Prefix': the_valid_prefix,
-              'Delimiter': '/',
               'StartAfter': the_valid_prefix
               }
+
+    if not recursive:
+        kwargs['Delimiter'] = '/'
 
     if not max_items is None:
         kwargs['MaxKeys'] = max_items

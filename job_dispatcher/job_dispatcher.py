@@ -5,7 +5,8 @@ import sys
 import xml.etree.ElementTree as ET
 import csv
 
-import s3worker
+sys.path.append("..")  # Adds higher directory to python modules path.
+from libs import s3worker
 
 
 # parse and submit job request
@@ -99,7 +100,7 @@ def submit_job(job_id, job_request, metadata_file_extention):
 #   - returns: a list of dictionaries ready to save as csv
 def parse_metadata_file(metadata_file, image_prefix):
     # the location where the images will appear in CP worker
-    # need to define here since CP requires the full path to the image in the file list. 
+    # need to define here since CP requires the full path to the image in the file list.
     IMAGE_DATA_BUCKET_DIR = '/home/ubuntu/image_data_bucket/'
 
     # check if image_prefix ends with "/". if not, add it
@@ -134,7 +135,8 @@ def parse_metadata_file(metadata_file, image_prefix):
                 URL_title: "file:" + IMAGE_DATA_BUCKET_DIR + valid_image_prefix + filename
             }
         else:
-            groups[group_id][URL_title] = "file:" + IMAGE_DATA_BUCKET_DIR + valid_image_prefix + filename
+            groups[group_id][URL_title] = "file:" + \
+                IMAGE_DATA_BUCKET_DIR + valid_image_prefix + filename
 
     rows = []
     for key, val in groups.items():
@@ -176,9 +178,12 @@ def create_tasks(s3_client, task_template, rows,
             if current_well != "":
                 the_task = task_template.copy()
                 the_task["task_id"] = current_well
-                the_task["task_input_prefix"] = the_task["sub_task_record_prefix"] + current_well + "/input/"
-                the_task["task_output_prefix"] = the_task["sub_task_record_prefix"] + current_well + "/output/"
-                the_task["file_list_key"] = the_task["task_input_prefix"] + current_well + ".csv"
+                the_task["task_input_prefix"] = the_task["sub_task_record_prefix"] + \
+                    current_well + "/input/"
+                the_task["task_output_prefix"] = the_task["sub_task_record_prefix"] + \
+                    current_well + "/output/"
+                the_task["file_list_key"] = the_task["task_input_prefix"] + \
+                    current_well + ".csv"
 
                 local_file = "/tmp/" + \
                     task_template["job_id"] + "-" + current_well + ".csv"

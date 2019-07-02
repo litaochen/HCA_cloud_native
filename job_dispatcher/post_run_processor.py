@@ -1,9 +1,12 @@
 # the post run processor is used to consolidate run result from each individual tasks
 # and put the result into the final output dir of each job
 import os
+import sys
 import boto3
-import s3worker
 import pandas as pd
+
+sys.path.append("..")  # Adds higher directory to python modules path.
+from libs import s3worker
 
 # get a list of output files from each individual tasks
 # args:
@@ -39,7 +42,7 @@ def get_result_files(s3_client, the_bucket, the_prefix, run_log_fname_keyword):
 #   - the_bucket:   the bucket where the run result is stored
 #   - consolidated_data_prefix:   the prefix to where the consolicated data file should be saved
 def consolidate_and_upload(s3, result_file_groups, the_bucket, consolidated_data_prefix):
-    for key, val in result_file_groups.iteritems():
+    for key, val in result_file_groups.items():
         dfs = []
         for f in result_file_groups[key]:
             local_copy = s3worker.download_file(s3, the_bucket, f, '/tmp')

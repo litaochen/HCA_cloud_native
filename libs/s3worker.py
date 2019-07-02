@@ -11,7 +11,7 @@ import boto3
 #   - num_items: number of item to retrieve, by default no limit.
 
 
-def get_content_in_dir(s3_client, the_bucket, the_prefix, max_items=None):
+def get_content_in_dir(s3_client, the_bucket, the_prefix, recursive=False, max_items=None):
     # check if prefix has "/" at the end, if not, add one
     if the_prefix[-1:] != '/':
         the_valid_prefix = the_prefix + '/'
@@ -20,9 +20,11 @@ def get_content_in_dir(s3_client, the_bucket, the_prefix, max_items=None):
 
     kwargs = {'Bucket': the_bucket,
               'Prefix': the_valid_prefix,
-              'Delimiter': '/',
               'StartAfter': the_valid_prefix
               }
+
+    if not recursive:
+        kwargs['Delimiter'] = '/'
 
     if not max_items is None:
         kwargs['MaxKeys'] = max_items
@@ -108,27 +110,27 @@ def upload_file(s3_client, path_to_file, the_bucket, the_key):
         raise e
 
 
-# quick test
-bucket = 'hca-cloud-native'
-prefix = 'example_data/'
-key_of_file = 'example_data/example.xdce'
-test_dir = 'test/'
+# # quick test
+# bucket = 'hca-cloud-native'
+# prefix = 'example_data/'
+# key_of_file = 'example_data/example.xdce'
+# test_dir = 'test/'
 
-s3 = boto3.client('s3')
+# s3 = boto3.client('s3')
 
-# list dir content
-content = get_content_in_dir(s3, bucket, prefix)
-print(content['dirs'])
-print(len(content['files']))
+# # list dir content
+# content = get_content_in_dir(s3, bucket, prefix)
+# print(content['dirs'])
+# print(len(content['files']))
 
-# get metadata
-metadata_files = find_by_extension(s3, bucket, prefix, 'xdce')
-print(metadata_files)
+# # get metadata
+# metadata_files = find_by_extension(s3, bucket, prefix, 'xdce')
+# print(metadata_files)
 
-# download file test
-local_copy_location = download_file(s3, bucket, key_of_file, '/tmp')
-print("location of the local copy: " + local_copy_location)
+# # download file test
+# local_copy_location = download_file(s3, bucket, key_of_file, '/tmp')
+# print("location of the local copy: " + local_copy_location)
 
 
-# upload a file test
-upload_file(s3, '/tmp/example.xdce', bucket, test_dir + "test_upload.xdce")
+# # upload a file test
+# upload_file(s3, '/tmp/example.xdce', bucket, test_dir + "test_upload.xdce")
