@@ -12,6 +12,7 @@ import watchtower
 import string
 
 import s3worker
+import post_run_processor as prp
 
 ###################################
 # Static info from initialization
@@ -32,7 +33,7 @@ app_config['LOG_STREAM_NAME'] = os.environ['CLOUDWATCH_LOG_STREAM_NAME']
 # variables grouped by bucket
 ######################################
 task_config = {}
-task_config['job_id'] = ''
+task_config['run_id'] = ''
 task_config['task_id'] = ''
 task_config['image_data_bucket'] = ''
 task_config['image_data_prefix'] = ''
@@ -40,7 +41,7 @@ task_config['image_data_prefix'] = ''
 task_config['cp_pipeline_file_bucket'] = ''
 task_config['cp_pipeline_file_key'] = ''
 
-task_config['job_record_bucket'] = ''
+task_config['run_record_bucket'] = ''
 task_config['image_list_file_key'] = ''
 task_config['task_input_prefix'] = ''
 task_config['task_output_prefix'] = ''
@@ -83,6 +84,8 @@ def printandlog(text, logger):
 # - start the work and log outout
 # - upload output back to S3
 # - unmount image data bucket and clean up files
+# - update task status in dynamoDB
+# - check if the whole run is done, if yes, run result consolidation
 
 # main work loop
 def main():
@@ -117,15 +120,15 @@ def main():
 
 def prepare_for_task(message):
     global task_config
-    task_config['job_id'] = message['job_id']
+    task_config['run_id'] = message['run_id']
     task_config['task_id'] = message['task_id']
-    task_config['image_data_bucket'] = message['image_data_bucket']
-    task_config['image_data_prefix'] = message['image_data_prefix']
+    task_config['image_data_bucket'] = message["image_data"]["s3_bucket"]
+    task_config['image_data_prefix'] = message["image_data"]["prefix"]
 
     task_config['cp_pipeline_file_bucket'] = message['pipeline_file']['s3_bucket']
     task_config['cp_pipeline_file_key'] = message['pipeline_file']['key']
 
-    task_config['job_record_bucket'] = message['job_record_bucket']
+    task_config['run_record_bucket'] = message["run_record_location"]["s3_bucket"]
     task_config['image_list_file_key'] = message['file_list_key']
     task_config['task_input_prefix'] = message['task_input_prefix']
     task_config['task_output_prefix'] = message['task_output_prefix']
@@ -140,7 +143,7 @@ def prepare_for_task(message):
 
     s3 = boto3.client('s3')
     print("downloading image list...")
-    task_config['image_list_local_copy'] = s3worker.download_file(s3, task_config['job_record_bucket'],
+    task_config['image_list_local_copy'] = s3worker.download_file(s3, task_config['run_record_bucket'],
                                                                   task_config['image_list_file_key'], app_config['TASK_INPUT_DIR'])
 
     print("downloading pileline file...")
@@ -158,7 +161,7 @@ def upload_result_and_clean_up():
 
     print(os.listdir(app_config['TASK_OUTPUT_DIR']))
     upload_result_command = ("aws s3 mv " + app_config['TASK_OUTPUT_DIR'] +
-                             " \"s3://" + task_config['job_record_bucket'] + '/' + task_config['task_output_prefix'] +
+                             " \"s3://" + task_config['run_record_bucket'] + '/' + task_config['task_output_prefix'] +
                              "\" --recursive")
     print("moving data to S3 with command: \n" + upload_result_command)
     os.system(upload_result_command)

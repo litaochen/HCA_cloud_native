@@ -4,22 +4,27 @@ import os
 import sys
 import xml.etree.ElementTree as ET
 import csv
+import time
 
 sys.path.append("..")  # Adds higher directory to python modules path.
 from libs import s3worker
 
 
-# parse and submit job request
+# parse and submit run request
 # args:
-#   - job_id: the unique job id for current job request
+#   - run_id: the unique run id for current run request
 #   - input: a dict describes the input dir in s3 bucket, pipeline file
 #   - metadata_file_extension: the extention of  the metadata file: "xdce", no dot.
-#   - job_record_dir: a dict describes the dir to store run related into in s3 bucket
-#                  certain dir structure will be created to hold output from each job
+#   - run_record_location: a dict describes the dir to store run related into in s3 bucket
+#                  certain dir structure will be created to hold output from each run
 
-# example job_request:
-# job_request = {
-#     "sqs_url": "https://sqs.us-east-1.amazonaws.com/263120685370/HCA-tasks",
+# example run_request:
+# run_request = {
+#     "user_id": user_id,
+#     "submit_date": timestamp,
+#     "run_id": run_id,
+#     "run_description": run_description,
+#     "sqs_url": queue_url,
 #     "image_data": {
 #         "s3_bucket": "hca-cloud-native",
 #         "prefix": "example_data/"
@@ -28,27 +33,24 @@ from libs import s3worker
 #         "s3_bucket": "hca-cloud-native",
 #         "key": "pipeline_files/test.cppipe"
 #     },
-#     "job_record_dir": {
-#           "s3_bucket": "hca-cloud-native",
-#           "prefix": "analysis_result/"
-#       }
+#     "run_record_location": run_record_location
 # }
 
-def submit_job(job_id, job_request, metadata_file_extention):
+def submit_run(run_request):
+    # add run record into run table
+    run_table = boto3.resource('dynamodb').Table('runs')
+    try:
+        run_table.put_item(Item = run_request)
+    except Exception as e:
+        print(e)
+
+
     s3 = boto3.client("s3")
     sqs = boto3.client("sqs")
 
-    the_bucket = job_request["image_data"]["s3_bucket"]
-    the_prefix = job_request["image_data"]["prefix"]
-
-    # check if output_path has "/" at the end, if not, add one
-    if job_request["job_record_dir"]["prefix"][-1:] != "/":
-        the_valid_job_record_dir = job_request["job_record_dir"]["prefix"] + "/"
-    else:
-        the_valid_job_record_dir = job_request["job_record_dir"]["prefix"]
-
-    sub_task_record_prefix = the_valid_job_record_dir + job_id + "/sub_tasks/"
-    final_output_prefix = the_valid_job_record_dir + job_id + "/consolidated_results/"
+    the_bucket = run_request["image_data"]["s3_bucket"]
+    the_prefix = run_request["image_data"]["prefix"]
+    metadata_file_extention = run_request["image_data"]['metadata_file_extention']
 
     # find the metadata file first
     metadata_files = s3worker.find_by_extension(
@@ -66,29 +68,16 @@ def submit_job(job_id, job_request, metadata_file_extention):
     local_copy = s3worker.download_file(
         s3, the_bucket, metadata_file, "/tmp")
 
-    rows = parse_metadata_file(local_copy, job_request["image_data"]["prefix"])
+    rows = parse_metadata_file(local_copy, run_request["image_data"]["prefix"])
+
 
     # build the template of the task
-    # the missing pieces will be added by "create_task" function
-    task_template = {
-        "job_id": job_id,
-        "task_id": "TO_BE_ADDED",
-        "image_data_bucket": job_request["image_data"]["s3_bucket"],
-        "image_data_prefix": job_request["image_data"]["prefix"],
-        "pipeline_file": job_request["pipeline_file"],
-        "job_record_bucket": job_request["job_record_dir"]["s3_bucket"],
-        "sub_task_record_prefix": sub_task_record_prefix,
-        "final_output_prefix": final_output_prefix,
-        "task_input_prefix": "TO_BE_ADDED",
-        "task_output_prefix": "TO_BE_ADDED",
-        "file_list_key": "TO_BE_ADDED"
-    }
+    task_template = build_task_template(run_request)
 
     # save individual image file list by well and add to queue
-    create_tasks(s3, task_template, rows, sqs, job_request["sqs_url"])
+    create_tasks(s3, task_template, rows, sqs, run_request["sqs_url"])
 
     count_tasks_in_queue()
-
 
 # parse the metadata and return a list of dictionaries ready to save as file list csv
 # args:
@@ -144,6 +133,43 @@ def parse_metadata_file(metadata_file, image_prefix):
     return rows
 
 
+# build task template based on run request
+# args:
+#   - run_request: the run request
+def build_task_template(run_request):
+    task_template = run_request.copy()
+
+    # check if output_path has "/" at the end, if not, add one
+    if task_template["run_record_location"]["prefix"][-1:] != "/":
+        the_valid_run_record_location = task_template["run_record_location"]["prefix"] + "/"
+    else:
+        the_valid_run_record_location = task_template["run_record_location"]["prefix"]
+
+    sub_task_record_prefix = the_valid_run_record_location + task_template['run_id'] + "/sub_tasks/"
+    final_output_prefix = the_valid_run_record_location + task_template['run_id'] + "/consolidated_results/"
+
+    # add additional info to the task template
+    # the missing pieces will be added by "create_task" function
+    task_template["task_id"] = "TO_BE_ADDED"
+    task_template["the_status"] = "submitted"
+    task_template["sub_task_record_prefix"] = sub_task_record_prefix
+    task_template["final_output_prefix"] = final_output_prefix
+    task_template["task_input_prefix"] = "TO_BE_ADDED"
+    task_template["task_output_prefix"] = "TO_BE_ADDED"
+    task_template["file_list_key"] = "TO_BE_ADDED"
+
+    return task_template
+
+    # task_template = {
+
+    #     "image_data_bucket": run_request["image_data"]["s3_bucket"],
+    #     "image_data_prefix": run_request["image_data"]["prefix"],
+    #     "pipeline_file": run_request["pipeline_file"],
+    #     "run_record_bucket": run_request["run_record_location"]["s3_bucket"],
+
+    # }
+
+
 # write rows to csv file, submit to S3 and sqs, each file contains groups from the same well
 # args:
 #   -s3_client: the s3 client used to interact with S3 bucket
@@ -153,17 +179,6 @@ def parse_metadata_file(metadata_file, image_prefix):
 #         contains images from the same well, same field
 #   - each task will have individual directory for the image list and output
 #   - a post-processing lambda will combine the output to sigle result file later
-
-# task template:
-    # task_template = {
-    #     "job_id": job_id,
-    #     "task_id": "TO_BE_ADDED",
-    #     "job_record_bucket": job_request["job_record_dir"]["s3_bucket"],
-    #     "task_input_dir": input_file_prefix,
-    #     "task_output_dir": output_file_prefix,
-    #     "file_list_key": "TO_BE_ADDED",
-    #     "pipeline_file": job_request["pipeline_file"]
-    # }
 
 def create_tasks(s3_client, task_template, rows,
                  sqs_client, QueueUrl):
@@ -186,13 +201,20 @@ def create_tasks(s3_client, task_template, rows,
                     current_well + ".csv"
 
                 local_file = "/tmp/" + \
-                    task_template["job_id"] + "-" + current_well + ".csv"
+                    task_template["run_id"] + "-" + current_well + ".csv"
 
                 save_to_csv(rows_for_task, local_file)
                 s3worker.upload_file(s3_client, local_file,
-                                     task_template["job_record_bucket"], the_task["file_list_key"])
+                                     task_template["run_record_location"]["s3_bucket"], the_task["file_list_key"])
                 os.remove(local_file)
                 rows_for_task = []
+
+                # add task into task table
+                task_table = boto3.resource('dynamodb').Table('tasks')
+                try:
+                    task_table.put_item(Item = the_task)
+                except Exception as e:
+                    print(e)
 
                 # enqueue the task
                 message = json.dumps(the_task)
@@ -256,30 +278,40 @@ def count_tasks_in_queue():
 # constants for dev
 # will be converted into arguments later
 queue_url = "https://sqs.us-east-1.amazonaws.com/263120685370/HCA-tasks"
-job_record_dir = {
+user_id = "litao"
+timestamp = str(int(round(time.time() * 1000)))
+run_id = user_id + '_' + timestamp
+run_name = 'test run on Incell data'
+run_description = 'this is a test run to check the app functionalities, good luck'
+run_table = 'runs'
+task_table = 'tasks'
+
+run_record_location = {
     "s3_bucket": "hca-cloud-native",
     "prefix": "run_history/"
 }
 
-job_request = {
+run_request = {
+    "user_id": user_id,
+    "submit_date": timestamp,
+    "run_id": run_id,
+    "run_description": run_description,
     "sqs_url": queue_url,
+    "run_table": run_table,
+    "task_table": task_table,
     "image_data": {
         "s3_bucket": "hca-cloud-native",
-        "prefix": "example_data/"
+        "prefix": "example_data/",
+        "metadata_file_extention": "xdce"
     },
     "pipeline_file": {
         "s3_bucket": "hca-cloud-native",
         "key": "pipeline_files/test.cppipe"
     },
-    "job_record_dir": job_record_dir
+    "run_record_location": run_record_location
 }
 
 # the location to store the analysis result
 # sub-dir structure will be created to save result from each taks
 
-
-# the job id. It is part of the output directory structure
-job_id = "20190626_ABC123"
-
-
-submit_job(job_id, job_request, "xdce")
+submit_run(run_request)
