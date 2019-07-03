@@ -11,6 +11,7 @@ import time
 import watchtower
 import string
 from boto3.dynamodb.conditions import Key, Attr
+from collections import Counter
 
 import s3worker
 import post_run_processor as prp
@@ -28,6 +29,13 @@ app_config['QUEUE_URL'] = os.environ['SQS_URL']
 app_config['LOG_GROUP_NAME'] = os.environ['CLOUDWATCH_LOG_GROUP_NAME']
 app_config['LOG_STREAM_NAME'] = os.environ['CLOUDWATCH_LOG_STREAM_NAME']
 
+###############################################
+# Controlled vocabulary for tasks status
+###############################################
+task_status = {}
+task_status['SCHEDULED'] = 'Scheduled'
+task_status['FINISHED'] = 'Finished'
+task_status['FAILED'] = 'Failed'
 
 ######################################
 # Task specific info from sqs message
@@ -53,7 +61,6 @@ task_config['pipeline_file_local_copy'] = ''
 # CLASS TO HANDLE THE SQS QUEUE
 #################################
 
-
 #################################
 # AUXILIARY FUNCTIONS
 #################################
@@ -73,10 +80,10 @@ def printandlog(text, logger):
     print(text)
     logger.info(text)
 
+
 #################################
 # RUN CELLPROFILER PROCESS
 #################################
-
 
 # order of actions:
 # - get task message from the queue
@@ -87,6 +94,7 @@ def printandlog(text, logger):
 # - unmount image data bucket and clean up files
 # - update task status in dynamoDB
 # - check if the whole run is done, if yes, run result consolidation
+
 
 # main work loop
 def main():
@@ -112,6 +120,7 @@ def main():
             queue.deleteMessage(handle)
             print("not column B, skipped")
 
+
 # prepare for task per the message from sqs
 # it does the things below:
 #   - set up variables per task. other part of the code will use those variables
@@ -123,19 +132,25 @@ def prepare_for_task(message):
     global task_config
     task_config['run_id'] = message['run_id']
     task_config['task_id'] = message['task_id']
+    task_config['run_table'] = message['run_table']
+    task_config['task_table'] = message['task_table']
     task_config['image_data_bucket'] = message["image_data"]["s3_bucket"]
     task_config['image_data_prefix'] = message["image_data"]["prefix"]
 
-    task_config['cp_pipeline_file_bucket'] = message['pipeline_file']['s3_bucket']
+    task_config['cp_pipeline_file_bucket'] = message['pipeline_file'][
+        's3_bucket']
     task_config['cp_pipeline_file_key'] = message['pipeline_file']['key']
 
-    task_config['run_record_bucket'] = message["run_record_location"]["s3_bucket"]
+    task_config['run_record_bucket'] = message["run_record_location"][
+        "s3_bucket"]
     task_config['image_list_file_key'] = message['file_list_key']
     task_config['task_input_prefix'] = message['task_input_prefix']
     task_config['task_output_prefix'] = message['task_output_prefix']
 
-    mount_s3_bucket_command = ("s3fs " + task_config['image_data_bucket'] + " " + app_config['IMAGE_DATA_BUCKET_DIR'] +
-                               " -o passwd_file=" + app_config['S3FS_CREDENTIAL_FILE'])
+    mount_s3_bucket_command = ("s3fs " + task_config['image_data_bucket'] +
+                               " " + app_config['IMAGE_DATA_BUCKET_DIR'] +
+                               " -o passwd_file=" +
+                               app_config['S3FS_CREDENTIAL_FILE'])
     os.system(mount_s3_bucket_command)
     if len(os.listdir(app_config['IMAGE_DATA_BUCKET_DIR'])) == 0:
         print("mount failed")
@@ -144,12 +159,14 @@ def prepare_for_task(message):
 
     s3 = boto3.client('s3')
     print("downloading image list...")
-    task_config['image_list_local_copy'] = s3worker.download_file(s3, task_config['run_record_bucket'],
-                                                                  task_config['image_list_file_key'], app_config['TASK_INPUT_DIR'])
+    task_config['image_list_local_copy'] = s3worker.download_file(
+        s3, task_config['run_record_bucket'],
+        task_config['image_list_file_key'], app_config['TASK_INPUT_DIR'])
 
     print("downloading pileline file...")
-    task_config['pipeline_file_local_copy'] = s3worker.download_file(s3, task_config['cp_pipeline_file_bucket'],
-                                                                     task_config['cp_pipeline_file_key'], app_config['TASK_INPUT_DIR'])
+    task_config['pipeline_file_local_copy'] = s3worker.download_file(
+        s3, task_config['cp_pipeline_file_bucket'],
+        task_config['cp_pipeline_file_key'], app_config['TASK_INPUT_DIR'])
 
 
 # post processing after CellProfiler finish the analysis
@@ -162,7 +179,8 @@ def upload_result_and_clean_up():
 
     print(os.listdir(app_config['TASK_OUTPUT_DIR']))
     upload_result_command = ("aws s3 mv " + app_config['TASK_OUTPUT_DIR'] +
-                             " \"s3://" + task_config['run_record_bucket'] + '/' + task_config['task_output_prefix'] +
+                             " \"s3://" + task_config['run_record_bucket'] +
+                             '/' + task_config['task_output_prefix'] +
                              "\" --recursive")
     print("moving data to S3 with command: \n" + upload_result_command)
     os.system(upload_result_command)
@@ -190,10 +208,11 @@ def build_cp_run_command():
     cmdstem = 'cellprofiler -c -r '
     cp_done_file = app_config['TASK_OUTPUT_DIR'] + '/done.txt'
 
-    cp_run_command = (cmdstem + " -p " + "'" + task_config['pipeline_file_local_copy'] + "'" +
-                      " --data-file=" + "'" + task_config['image_list_local_copy'] + "'" +
-                      " -o " + "'" + app_config['TASK_OUTPUT_DIR'] + "'" +
-                      " -d " + "'" + cp_done_file) + "'"
+    cp_run_command = (
+        cmdstem + " -p " + "'" + task_config['pipeline_file_local_copy'] +
+        "'" + " --data-file=" + "'" + task_config['image_list_local_copy'] +
+        "'" + " -o " + "'" + app_config['TASK_OUTPUT_DIR'] + "'" + " -d " +
+        "'" + cp_done_file) + "'"
     return cp_run_command
     # logger.info(cmd)
 
@@ -204,7 +223,7 @@ def build_cp_run_command():
 
 # update task status
 def update_task_status(status):
-    table = boto3.resource('dynamodb').Table('tasks')
+    table = boto3.resource('dynamodb').Table(task_config['task_table'])
 
     # update status
     response = table.update_item(
@@ -213,81 +232,37 @@ def update_task_status(status):
             'task_id': task_config['task_id']
         },
         UpdateExpression="set the_status = :new_status",
-        ExpressionAttributeValues={
-            ':new_status': 'finished'
-        },
-        ReturnValues="ALL_NEW"
-    )
+        ExpressionAttributeValues={':new_status': 'finished'},
+        ReturnValues="ALL_NEW")
 
     print(response)
 
 
-# update run status
-def update_run_status(status):
-    table = boto3.resource('dynamodb').Table('tasks')
-
-    # update status
-    response = table.update_item(
-        Key={
-            'run_id': task_config['run_id'],
-            'task_id': task_config['task_id']
-        },
-        UpdateExpression="set the_status = :new_status",
-        ExpressionAttributeValues={
-            ':new_status': 'finished'
-        },
-        ReturnValues="ALL_NEW"
-    )
-
-    print(response)
-
-
-# update run status and return to caller
-# return values:
-#   - (False, "running")            run is still ongoing ,some tasks is in "submitted" status
-#   - (True, "Succeed")             run finished with no error, no task is in "submitted" status
-#   - (True, "partially failed")    run finished with tasks failed, no task is in "submitted" status
-#                                                                   but some tasks are in "failed" status
-
-# if current run is finished, run post_run_processor to consolidate results
-def update_run_status():
+# check if run is finished, disregard if there is error or not
+# criteria: if no task is in "scheduled" status, then it is done.
+def is_run_finished():
     task_table = boto3.resource('dynamodb').Table('tasks')
-    run_table = boto3.resource('dynamodb').Table('runs')
 
     # get tasks status
     response = task_table.query(
-        KeyConditionExpression=Key('run_id').eq(task_config['run_id'])
-    )
+        KeyConditionExpression=Key('run_id').eq(task_config['run_id']))
 
-    tasks_status =  [ x['the_status'] for x in  response['Items'] ]    
+    tasks_status = [x['the_status'] for x in response['Items']]
 
-    # get run status
-    response = run_table.query(
-         KeyConditionExpression=Key('run_id').eq(task_config['run_id'])
-    )
-    run_status = reponse['Items'][0]
-
-
-    if 'submitted' in tasks_status and run_status != 'submitted':
-        # update run status to "running"
-    elif 'failed' in task_status:
-        # update run status to failed
-        return (True, "failed")
+    if task_status['SCHEDULED'] in tasks_status:
+        return False
     else:
-        # update run status to sucess
-        return (True, "success")
-
+        return True
 
 
 class JobQueue():
-
     def __init__(self, queueURL):
         self.client = boto3.client('sqs')
         self.queueURL = queueURL
 
     def readMessage(self):
-        response = self.client.receive_message(
-            QueueUrl=self.queueURL, WaitTimeSeconds=20)
+        response = self.client.receive_message(QueueUrl=self.queueURL,
+                                               WaitTimeSeconds=20)
         if 'Messages' in response.keys():
             data = json.loads(response['Messages'][0]['Body'])
             handle = response['Messages'][0]['ReceiptHandle']
@@ -296,13 +271,14 @@ class JobQueue():
             return None, None
 
     def deleteMessage(self, handle):
-        self.client.delete_message(
-            QueueUrl=self.queueURL, ReceiptHandle=handle)
+        self.client.delete_message(QueueUrl=self.queueURL,
+                                   ReceiptHandle=handle)
         return
 
     def returnMessage(self, handle):
-        self.client.change_message_visibility(
-            QueueUrl=self.queueURL, ReceiptHandle=handle, VisibilityTimeout=60)
+        self.client.change_message_visibility(QueueUrl=self.queueURL,
+                                              ReceiptHandle=handle,
+                                              VisibilityTimeout=60)
         return
 
 
