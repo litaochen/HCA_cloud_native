@@ -10,6 +10,7 @@ import sys
 import time
 import watchtower
 import string
+from boto3.dynamodb.conditions import Key, Attr
 
 import s3worker
 import post_run_processor as prp
@@ -199,6 +200,83 @@ def build_cp_run_command():
     # subp = subprocess.Popen(
     #     cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     # monitorAndLog(subp, logger)
+
+
+# update task status
+def update_task_status(status):
+    table = boto3.resource('dynamodb').Table('tasks')
+
+    # update status
+    response = table.update_item(
+        Key={
+            'run_id': task_config['run_id'],
+            'task_id': task_config['task_id']
+        },
+        UpdateExpression="set the_status = :new_status",
+        ExpressionAttributeValues={
+            ':new_status': 'finished'
+        },
+        ReturnValues="ALL_NEW"
+    )
+
+    print(response)
+
+
+# update run status
+def update_run_status(status):
+    table = boto3.resource('dynamodb').Table('tasks')
+
+    # update status
+    response = table.update_item(
+        Key={
+            'run_id': task_config['run_id'],
+            'task_id': task_config['task_id']
+        },
+        UpdateExpression="set the_status = :new_status",
+        ExpressionAttributeValues={
+            ':new_status': 'finished'
+        },
+        ReturnValues="ALL_NEW"
+    )
+
+    print(response)
+
+
+# update run status and return to caller
+# return values:
+#   - (False, "running")            run is still ongoing ,some tasks is in "submitted" status
+#   - (True, "Succeed")             run finished with no error, no task is in "submitted" status
+#   - (True, "partially failed")    run finished with tasks failed, no task is in "submitted" status
+#                                                                   but some tasks are in "failed" status
+
+# if current run is finished, run post_run_processor to consolidate results
+def update_run_status():
+    task_table = boto3.resource('dynamodb').Table('tasks')
+    run_table = boto3.resource('dynamodb').Table('runs')
+
+    # get tasks status
+    response = task_table.query(
+        KeyConditionExpression=Key('run_id').eq(task_config['run_id'])
+    )
+
+    tasks_status =  [ x['the_status'] for x in  response['Items'] ]    
+
+    # get run status
+    response = run_table.query(
+         KeyConditionExpression=Key('run_id').eq(task_config['run_id'])
+    )
+    run_status = reponse['Items'][0]
+
+
+    if 'submitted' in tasks_status and run_status != 'submitted':
+        # update run status to "running"
+    elif 'failed' in task_status:
+        # update run status to failed
+        return (True, "failed")
+    else:
+        # update run status to sucess
+        return (True, "success")
+
 
 
 class JobQueue():
