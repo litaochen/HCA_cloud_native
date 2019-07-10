@@ -246,8 +246,6 @@ def update_task_status(status):
         ExpressionAttributeValues={':new_status': status},
         ReturnValues="ALL_NEW")
 
-    print(response)
-
 
 # check if run is finished, disregard if there is error or not
 # criteria: if no task is in "scheduled" status, then it is done.
