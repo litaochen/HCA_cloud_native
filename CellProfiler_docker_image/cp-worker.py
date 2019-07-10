@@ -26,6 +26,7 @@ app_config['IMAGE_DATA_BUCKET_DIR'] = os.environ['IMAGE_DATA_BUCKET_DIR']
 app_config['TASK_INPUT_DIR'] = os.environ['TASK_INPUT_DIR']
 app_config['TASK_OUTPUT_DIR'] = os.environ['TASK_OUTPUT_DIR']
 
+app_config['task_queue_url'] = os.environ['TASK_QUEUE_URL']
 app_config['LOG_GROUP_NAME'] = os.environ['CLOUDWATCH_LOG_GROUP_NAME']
 app_config['LOG_STREAM_NAME'] = os.environ['CLOUDWATCH_LOG_STREAM_NAME']
 
@@ -92,7 +93,7 @@ def printandlog(text, logger):
 
 # main work loop
 def main():
-    task_queue = JobQueue(task_config['task_queue_url'])
+    task_queue = JobQueue(app_config['task_queue_url'])
     # Main loop. Keep reading messages while they are available in SQS
     while True:
         print("getting next task")
@@ -135,7 +136,6 @@ def prepare_for_task(message):
     task_config['run_id'] = message['run_id']
     task_config['task_id'] = message['task_id']
 
-    task_config['task_queue_url'] = message['task_queue_url']
     task_config['result_consolidation_queue_url'] = message['result_consolidation_queue_url']
 
     task_config['run_table'] = message['run_table']
@@ -275,6 +275,7 @@ def update_run_status():
 
 # function to build result consolidation task message
 def build_result_consolidation_message():
+    the_message = {}
     the_message['run_record_bucket'] = task_config['run_record_bucket']
     the_message['sub_task_record_prefix'] = task_config['sub_task_record_prefix']
     message['final_output_prefix'] = task_config['final_output_prefix']

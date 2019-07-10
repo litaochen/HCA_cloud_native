@@ -1,6 +1,7 @@
 # a class to handle job queue operation
 
 import json
+import boto3
 
 class JobQueue():
     def __init__(self, queueURL):
