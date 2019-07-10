@@ -49,6 +49,7 @@ run_status['FAILED'] = 'Failed'
 # variables grouped by bucket
 ######################################
 task_config = {}
+task_config['file_to_ignore'] = ['Experiment.csv']
 
 #################################
 # CLASS TO HANDLE THE SQS QUEUE
@@ -106,6 +107,7 @@ def main():
             os.system(cp_run_command)
             upload_result_and_clean_up()
             update_task_status(task_status['FINISHED'])
+            update_run_status()
 
             # reset task-related config. To be sure does not affect previous run
             for key, value in task_config.iteritems():
@@ -147,6 +149,8 @@ def prepare_for_task(message):
 
     task_config['run_record_bucket'] = message["run_record_location"][
         "s3_bucket"]
+    task_config['sub_task_record_prefix'] = message['sub_task_record_prefix']
+    task_config['final_output_prefix'] = message['final_output_prefix']
     task_config['image_list_file_key'] = message['file_list_key']
     task_config['task_input_prefix'] = message['task_input_prefix']
     task_config['task_output_prefix'] = message['task_output_prefix']
@@ -262,18 +266,21 @@ def update_run_status():
     print(response)
 
     # check if the whole run is done
-    if is_run_finished():
-        result_consolidation_message = {}
-        
-
-
-
+    # if is_run_finished():
+    if True:
+        message = build_result_consolidation_message()
         reslut_consolidation_queue = JobQueue(task_config['result_consolidation_queue_url'])
-        reslut_consolidation_queue.enqueueMessage()
-
-    
+        reslut_consolidation_queue.enqueueMessage(message) 
 
 
+# function to build result consolidation task message
+def build_result_consolidation_message():
+    the_message['run_record_bucket'] = task_config['run_record_bucket']
+    the_message['sub_task_record_prefix'] = task_config['sub_task_record_prefix']
+    message['final_output_prefix'] = task_config['final_output_prefix']
+    the_message['file_to_ignore'] = task_config['file_to_ignore']
+
+    return the_message
 
 
 # check if run is finished, disregard if there is error or not

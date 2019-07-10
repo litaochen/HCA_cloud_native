@@ -8,6 +8,7 @@ import time
 
 sys.path.append("..")  # Adds higher directory to python modules path.
 from libs import s3worker
+from libs.JobQueue import JobQueue
 
 
 # parse and submit run request
@@ -70,14 +71,13 @@ def submit_run(run_request):
 
     rows = parse_metadata_file(local_copy, run_request["image_data"]["prefix"])
 
-
     # build the template of the task
     task_template = build_task_template(run_request)
 
     # save individual image file list by well and add to queue
-    create_tasks(s3, task_template, rows, sqs, run_request["sqs_url"])
+    create_tasks(s3, task_template, rows, sqs, run_request["task_queue_url"])
 
-    count_tasks_in_queue()
+    count_tasks_in_queue(run_request['task_queue_url'])
 
 # parse the metadata and return a list of dictionaries ready to save as file list csv
 # args:
@@ -185,6 +185,8 @@ def create_tasks(s3_client, task_template, rows,
     current_well = ""
     rows_for_task = []
 
+    task_queue = JobQueue(QueueUrl)
+
     # add a dummy row to flush the last well
     rows.append({"Well_Location": "dummy"})
     for row in rows:
@@ -217,8 +219,9 @@ def create_tasks(s3_client, task_template, rows,
                     print(e)
 
                 # enqueue the task
-                message = json.dumps(the_task)
-                enqueue_task(sqs_client, message)
+                task_queue.enqueueMessage(the_task)
+                # message = json.dumps(the_task)
+                # enqueue_task(sqs_client, message)
 
             current_well = row["Well_Location"]
         rows_for_task.append(row)
@@ -238,24 +241,8 @@ def save_to_csv(rows, filename):
         w.writerows(rows)
 
 
-# submit message to aws sqs
-# args:
-#   - sqs_client: the sqs client to interact with sqs
-#   - QueueUrl: the queue url
-#   - message: the message to enqueue
-def enqueue_task(sqs_client, message):
-    # send a message
-    print("sending the message..")
-    response = sqs_client.send_message(
-        QueueUrl=queue_url,
-        MessageBody=message,
-    )
-
-    print("message sent")
-
-
 # check number of messages in the queue
-def count_tasks_in_queue():
+def count_tasks_in_queue(queue_url):
     client = boto3.client("sqs")
     print("getting number of messages in the queue")
     # get queue attributes
@@ -297,7 +284,7 @@ run_request = {
     "submit_date": timestamp,
     "run_id": run_id,
     "run_description": run_description,
-    "task_queue_url": queue_url,
+    "task_queue_url": task_queue_url,
     "reslut_consolidataion_queue_url": reslut_consolidataion_queue_url,
     "run_table": run_table,
     "task_table": task_table,
