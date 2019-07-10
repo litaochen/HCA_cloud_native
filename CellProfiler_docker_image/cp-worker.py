@@ -15,6 +15,7 @@ from collections import Counter
 
 import s3worker
 import post_run_processor as prp
+from JobQueue import JobQueue
 
 ###################################
 # Static info from initialization
@@ -25,7 +26,6 @@ app_config['IMAGE_DATA_BUCKET_DIR'] = os.environ['IMAGE_DATA_BUCKET_DIR']
 app_config['TASK_INPUT_DIR'] = os.environ['TASK_INPUT_DIR']
 app_config['TASK_OUTPUT_DIR'] = os.environ['TASK_OUTPUT_DIR']
 
-app_config['QUEUE_URL'] = os.environ['SQS_URL']
 app_config['LOG_GROUP_NAME'] = os.environ['CLOUDWATCH_LOG_GROUP_NAME']
 app_config['LOG_STREAM_NAME'] = os.environ['CLOUDWATCH_LOG_STREAM_NAME']
 
@@ -45,26 +45,10 @@ run_status['FAILED'] = 'Failed'
 
 ######################################
 # Task specific info from sqs message
+# info will be added later
 # variables grouped by bucket
 ######################################
 task_config = {}
-task_config['run_id'] = ''
-task_config['task_id'] = ''
-
-task_config['task_table'] = ''
-task_config['run_table'] = ''
-task_config['image_data_bucket'] = ''
-task_config['image_data_prefix'] = ''
-
-task_config['cp_pipeline_file_bucket'] = ''
-task_config['cp_pipeline_file_key'] = ''
-
-task_config['run_record_bucket'] = ''
-task_config['image_list_file_key'] = ''
-task_config['task_input_prefix'] = ''
-task_config['task_output_prefix'] = ''
-task_config['image_list_local_copy'] = ''
-task_config['pipeline_file_local_copy'] = ''
 
 #################################
 # CLASS TO HANDLE THE SQS QUEUE
@@ -107,11 +91,11 @@ def printandlog(text, logger):
 
 # main work loop
 def main():
-    queue = JobQueue(app_config['QUEUE_URL'])
+    task_queue = JobQueue(task_config['task_queue_url'])
     # Main loop. Keep reading messages while they are available in SQS
     while True:
         print("getting next task")
-        msg, handle = queue.readMessage()
+        msg, handle = task_queue.readMessage()
         if msg is None:
             break
         if msg['task_id'][0] == 'B':
@@ -127,11 +111,11 @@ def main():
             for key, value in task_config.iteritems():
                 task_config[key] = ''
 
-            queue.deleteMessage(handle)
+            task_queue.deleteMessage(handle)
 
             break
         else:
-            queue.deleteMessage(handle)
+            task_queue.deleteMessage(handle)
             print("not column B, skipped")
 
 
@@ -144,8 +128,14 @@ def main():
 
 def prepare_for_task(message):
     global task_config
+    task_config['user_id'] = message['user_id']
+    task_config['submit_date'] = message['submit_date']
     task_config['run_id'] = message['run_id']
     task_config['task_id'] = message['task_id']
+
+    task_config['task_queue_url'] = message['task_queue_url']
+    task_config['result_consolidation_queue_url'] = message['result_consolidation_queue_url']
+
     task_config['run_table'] = message['run_table']
     task_config['task_table'] = message['task_table']
     task_config['image_data_bucket'] = message["image_data"]["s3_bucket"]
@@ -234,10 +224,10 @@ def build_cp_run_command():
 
 # update task status
 def update_task_status(status):
-    table = boto3.resource('dynamodb').Table(task_config['task_table'])
+    task_table = boto3.resource('dynamodb').Table(task_config['task_table'])
 
     # update status
-    response = table.update_item(
+    response = task_table.update_item(
         Key={
             'run_id': task_config['run_id'],
             'task_id': task_config['task_id']
@@ -246,11 +236,50 @@ def update_task_status(status):
         ExpressionAttributeValues={':new_status': status},
         ReturnValues="ALL_NEW")
 
+# update run status
+# actions includes:
+#   - update run status to "running" if it is till in "scheduled"
+#   - if all tasks are done, update runs status to "finished" with conditional writing
+#   - if status update succeed, push task to the result consolidataion queue
+#   - the conditional writing ensure only one task will be pushed per run
+#   
+def update_run_status():
+    run_table = boto3.resource('dynamodb').Table(task_config['run_table'])
+
+    # update run status to running if it is not yet
+    response = run_table.update_item(
+        Key={
+            'user_id': task_config['user_id'],
+            'submit_date': task_config['submit_date']
+        },
+        UpdateExpression="set the_status = :new_status",
+        ConditionExpression="the_status == :current_status",
+        ExpressionAttributeValues={
+            ':new_status': run_status['RUNNING'],
+            ':current_status': run_status['SCHEDULED']
+        },
+        ReturnValues="ALL_NEW")
+    print(response)
+
+    # check if the whole run is done
+    if is_run_finished():
+        result_consolidation_message = {}
+        
+
+
+
+        reslut_consolidation_queue = JobQueue(task_config['result_consolidation_queue_url'])
+        reslut_consolidation_queue.enqueueMessage()
+
+    
+
+
+
 
 # check if run is finished, disregard if there is error or not
 # criteria: if no task is in "scheduled" status, then it is done.
 def is_run_finished():
-    task_table = boto3.resource('dynamodb').Table('tasks')
+    task_table = boto3.resource('dynamodb').Table(task_config['task_table'])
 
     # get tasks status
     response = task_table.query(
@@ -258,37 +287,14 @@ def is_run_finished():
 
     tasks_status = [x['the_status'] for x in response['Items']]
 
+    # show the overall status of the run
+    print(dict(Counter(tasks_status)))
+
     if task_status['SCHEDULED'] in tasks_status:
         return False
     else:
         return True
 
-
-class JobQueue():
-    def __init__(self, queueURL):
-        self.client = boto3.client('sqs')
-        self.queueURL = queueURL
-
-    def readMessage(self):
-        response = self.client.receive_message(QueueUrl=self.queueURL,
-                                               WaitTimeSeconds=20)
-        if 'Messages' in response.keys():
-            data = json.loads(response['Messages'][0]['Body'])
-            handle = response['Messages'][0]['ReceiptHandle']
-            return data, handle
-        else:
-            return None, None
-
-    def deleteMessage(self, handle):
-        self.client.delete_message(QueueUrl=self.queueURL,
-                                   ReceiptHandle=handle)
-        return
-
-    def returnMessage(self, handle):
-        self.client.change_message_visibility(QueueUrl=self.queueURL,
-                                              ReceiptHandle=handle,
-                                              VisibilityTimeout=60)
-        return
 
 
 # Entry point

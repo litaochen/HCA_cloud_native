@@ -277,7 +277,8 @@ def count_tasks_in_queue():
 
 # constants for dev
 # will be converted into arguments later
-queue_url = "https://sqs.us-east-1.amazonaws.com/263120685370/HCA-tasks"
+task_queue_url = "https://sqs.us-east-1.amazonaws.com/263120685370/HCA-tasks"
+reslut_consolidataion_queue_url = "https://sqs.us-east-1.amazonaws.com/263120685370/HCA-result-consolidation"
 user_id = "litao"
 timestamp = str(int(round(time.time() * 1000)))
 run_id = user_id + '_' + timestamp
@@ -296,7 +297,8 @@ run_request = {
     "submit_date": timestamp,
     "run_id": run_id,
     "run_description": run_description,
-    "sqs_url": queue_url,
+    "task_queue_url": queue_url,
+    "reslut_consolidataion_queue_url": reslut_consolidataion_queue_url,
     "run_table": run_table,
     "task_table": task_table,
     "image_data": {
