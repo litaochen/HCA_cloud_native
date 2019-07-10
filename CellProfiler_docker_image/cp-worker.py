@@ -37,6 +37,12 @@ task_status['SCHEDULED'] = 'Scheduled'
 task_status['FINISHED'] = 'Finished'
 task_status['FAILED'] = 'Failed'
 
+run_status = {}
+run_status['SCHEDULED'] = 'Scheduled'
+run_status['RUNNING'] = 'Running'
+run_status['FINISHED'] = 'Finished'
+run_status['FAILED'] = 'Failed'
+
 ######################################
 # Task specific info from sqs message
 # variables grouped by bucket
@@ -44,6 +50,9 @@ task_status['FAILED'] = 'Failed'
 task_config = {}
 task_config['run_id'] = ''
 task_config['task_id'] = ''
+
+task_config['task_table'] = ''
+task_config['run_table'] = ''
 task_config['image_data_bucket'] = ''
 task_config['image_data_prefix'] = ''
 
@@ -111,11 +120,16 @@ def main():
             cp_run_command = build_cp_run_command()
             print('Start the analysis with command: ', cp_run_command)
             os.system(cp_run_command)
-            queue.deleteMessage(handle)
-            # result = subprocess.check_output(cp_run_command.split(), stderr=subprocess.STDOUT)
-            # print(result)
-
             upload_result_and_clean_up()
+            update_task_status(task_status['FINISHED'])
+
+            # reset task-related config. To be sure does not affect previous run
+            for key, value in task_config.iteritems():
+                task_config[key] = ''
+
+            queue.deleteMessage(handle)
+
+            break
         else:
             queue.deleteMessage(handle)
             print("not column B, skipped")
@@ -190,9 +204,6 @@ def upload_result_and_clean_up():
         os.system('rm -r ' + app_config['TASK_OUTPUT_DIR'] + '/*')
     os.system("umount " + app_config['IMAGE_DATA_BUCKET_DIR'])
 
-    # reset task-related config. To be sure does not affect previous run
-    for key, value in task_config.iteritems():
-        task_config[key] = ''
 
 
 # construct CellProfiler run command
@@ -232,7 +243,7 @@ def update_task_status(status):
             'task_id': task_config['task_id']
         },
         UpdateExpression="set the_status = :new_status",
-        ExpressionAttributeValues={':new_status': 'finished'},
+        ExpressionAttributeValues={':new_status': status},
         ReturnValues="ALL_NEW")
 
     print(response)

@@ -9,11 +9,11 @@ FROM cellprofiler/cellprofiler:3.1.8
 RUN apt-get update && yes | apt-get install curl s3fs
 
 # Install AWS CLI, boto3 and watchover
-RUN \
-  pip  install -U \
-  awscli \
-  boto3 \
-  watchtower \
+RUN pip install \
+  pandas==0.22.0 \
+  awscli==1.16.187 \
+  boto3==1.9.177 \
+  watchtower==0.6.0 \
   urllib3==1.21.1
 
 # SETUP NEW ENTRYPOINT

@@ -210,7 +210,7 @@ def create_tasks(s3_client, task_template, rows,
                 rows_for_task = []
 
                 # add task into task table
-                task_table = boto3.resource('dynamodb').Table('tasks')
+                task_table = boto3.resource('dynamodb').Table(task_template['task_table'])
                 try:
                     task_table.put_item(Item = the_task)
                 except Exception as e:

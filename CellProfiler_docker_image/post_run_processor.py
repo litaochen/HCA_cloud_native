@@ -5,8 +5,7 @@ import sys
 import boto3
 import pandas as pd
 
-sys.path.append("..")  # Adds higher directory to python modules path.
-from libs import s3worker
+import s3worker
 
 # get a list of output files from each individual tasks
 # args:
