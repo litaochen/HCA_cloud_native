@@ -199,7 +199,6 @@ def upload_result_and_clean_up():
     os.system("umount " + app_config['IMAGE_DATA_BUCKET_DIR'])
 
 
-
 # construct CellProfiler run command
 def build_cp_run_command():
     cmdstem = ""
@@ -246,7 +245,9 @@ def update_task_status(status):
 #   - if all tasks are done, update runs status to "finished" with conditional writing
 #   - if status update succeed, push task to the result consolidataion queue
 #   - the conditional writing ensure only one task will be pushed per run
-#   
+#
+
+
 def update_run_status():
     run_table = boto3.resource('dynamodb').Table(task_config['run_table'])
 
@@ -268,11 +269,14 @@ def update_run_status():
         pass
 
     # check if the whole run is done
-    if is_run_finished():
-        print('All the tasks from this run has been done. prepare for result consolidation.')
+    # if is_run_finished():
+    if True:
+        print(
+            'All the tasks from this run has been done. prepare for result consolidation.')
         message = build_result_consolidation_message()
-        reslut_consolidation_queue = JobQueue(task_config['result_consolidation_queue_url'])
-        reslut_consolidation_queue.enqueueMessage(message) 
+        reslut_consolidation_queue = JobQueue(
+            task_config['result_consolidation_queue_url'])
+        reslut_consolidation_queue.enqueueMessage(message)
 
 
 # function to build result consolidation task message
@@ -306,8 +310,6 @@ def is_run_finished():
         return True
 
 
-
 # Entry point
-
 if __name__ == '__main__':
     main()
