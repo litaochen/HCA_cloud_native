@@ -151,7 +151,7 @@ def build_task_template(run_request):
     # add additional info to the task template
     # the missing pieces will be added by "create_task" function
     task_template["task_id"] = "TO_BE_ADDED"
-    task_template["the_status"] = "submitted"
+    task_template["the_status"] = "Scheduled"
     task_template["sub_task_record_prefix"] = sub_task_record_prefix
     task_template["final_output_prefix"] = final_output_prefix
     task_template["task_input_prefix"] = "TO_BE_ADDED"

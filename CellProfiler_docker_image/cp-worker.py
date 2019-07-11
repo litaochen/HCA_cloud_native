@@ -251,23 +251,25 @@ def update_run_status():
     run_table = boto3.resource('dynamodb').Table(task_config['run_table'])
 
     # update run status to running if it is not yet
-    response = run_table.update_item(
-        Key={
-            'user_id': task_config['user_id'],
-            'submit_date': task_config['submit_date']
-        },
-        UpdateExpression="set the_status = :new_status",
-        ConditionExpression="the_status == :current_status",
-        ExpressionAttributeValues={
-            ':new_status': run_status['RUNNING'],
-            ':current_status': run_status['SCHEDULED']
-        },
-        ReturnValues="ALL_NEW")
-    print(response)
+    try:
+        run_table.update_item(
+            Key={
+                'user_id': task_config['user_id'],
+                'submit_date': task_config['submit_date']
+            },
+            UpdateExpression="set the_status = :new_status",
+            ConditionExpression="the_status = :current_status",
+            ExpressionAttributeValues={
+                ':new_status': run_status['RUNNING'],
+                ':current_status': run_status['SCHEDULED']
+            },
+            ReturnValues="ALL_NEW")
+    except:
+        pass
 
     # check if the whole run is done
-    # if is_run_finished():
-    if True:
+    if is_run_finished():
+        print('All the tasks from this run has been done. prepare for result consolidation.')
         message = build_result_consolidation_message()
         reslut_consolidation_queue = JobQueue(task_config['result_consolidation_queue_url'])
         reslut_consolidation_queue.enqueueMessage(message) 
@@ -278,7 +280,7 @@ def build_result_consolidation_message():
     the_message = {}
     the_message['run_record_bucket'] = task_config['run_record_bucket']
     the_message['sub_task_record_prefix'] = task_config['sub_task_record_prefix']
-    message['final_output_prefix'] = task_config['final_output_prefix']
+    the_message['final_output_prefix'] = task_config['final_output_prefix']
     the_message['file_to_ignore'] = task_config['file_to_ignore']
 
     return the_message

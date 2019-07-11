@@ -6,6 +6,25 @@ import boto3
 import pandas as pd
 
 import s3worker
+from JobQueue import JobQueue
+
+
+######################
+# App static variables
+######################
+app_config = {}
+app_config['job_queue'] = os.environ['RESULT_CONSOLIDATION_QUEUE_URL']
+
+
+# main work loop
+main():
+    task_queue = JobQueue(app_config['job_queue'])
+    while True:
+        message, handler = task_queue.
+
+
+
+
 
 # get a list of output files from each individual tasks
 # args:
