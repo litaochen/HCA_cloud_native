@@ -5,16 +5,16 @@ import json
 import logging
 import os
 import re
-import subprocess
+import subprocess, shlex
 import sys
 import time
+import logging
 import watchtower
 import string
 from boto3.dynamodb.conditions import Key, Attr
 from collections import Counter
 
 import s3worker
-import post_run_processor as prp
 from JobQueue import JobQueue
 
 ###################################
@@ -50,30 +50,8 @@ run_status['FAILED'] = 'Failed'
 # variables grouped by bucket
 ######################################
 task_config = {}
-task_config['file_to_ignore'] = ['Experiment.csv']
-
-#################################
-# CLASS TO HANDLE THE SQS QUEUE
-#################################
-
-#################################
-# AUXILIARY FUNCTIONS
-#################################
-
-
-def monitorAndLog(process, logger):
-    while True:
-        output = process.stdout.readline()
-        if output == '' and process.poll() is not None:
-            break
-        if output:
-            print(output.strip())
-            logger.info(output)
-
-
-def printandlog(text, logger):
-    print(text)
-    logger.info(text)
+task_config['file_to_ignore'] = 'Experiment.csv'
+logger = None
 
 
 #################################
@@ -102,10 +80,15 @@ def main():
             break
         if msg['task_id'][0] == 'B':
             prepare_for_task(msg)
-            print("current task_id: " + task_config['task_id'])
+            logger.info("current task_id: " + task_config['task_id'])
             cp_run_command = build_cp_run_command()
-            print('Start the analysis with command: ', cp_run_command)
-            os.system(cp_run_command)
+            logger.info('Start the analysis with command: ' + cp_run_command)
+            
+            subp = subprocess.Popen(shlex.split(cp_run_command), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            monitorAndLog(subp,logger)
+            # os.system(cp_run_command)
+            # monitorAndLog(process, logger)
+
             upload_result_and_clean_up()
             update_task_status(task_status['FINISHED'])
             update_run_status()
@@ -130,7 +113,7 @@ def main():
 
 
 def prepare_for_task(message):
-    global task_config
+    global task_config, logger
     task_config['user_id'] = message['user_id']
     task_config['submit_date'] = message['submit_date']
     task_config['run_id'] = message['run_id']
@@ -155,27 +138,61 @@ def prepare_for_task(message):
     task_config['task_input_prefix'] = message['task_input_prefix']
     task_config['task_output_prefix'] = message['task_output_prefix']
 
+    logger = get_logger()
+
     mount_s3_bucket_command = ("s3fs " + task_config['image_data_bucket'] +
                                " " + app_config['IMAGE_DATA_BUCKET_DIR'] +
                                " -o passwd_file=" +
                                app_config['S3FS_CREDENTIAL_FILE'])
     os.system(mount_s3_bucket_command)
     if len(os.listdir(app_config['IMAGE_DATA_BUCKET_DIR'])) == 0:
-        print("mount failed")
+        logger.info("mount failed")
     else:
-        print("mount successfully")
+        logger.info("mount successfully")
 
     s3 = boto3.client('s3')
-    print("downloading image list...")
+    logger.info("downloading image list...")
     task_config['image_list_local_copy'] = s3worker.download_file(
         s3, task_config['run_record_bucket'],
         task_config['image_list_file_key'], app_config['TASK_INPUT_DIR'])
 
-    print("downloading pileline file...")
+    logger.info("downloading pileline file...")
     task_config['pipeline_file_local_copy'] = s3worker.download_file(
         s3, task_config['cp_pipeline_file_bucket'],
         task_config['cp_pipeline_file_key'], app_config['TASK_INPUT_DIR'])
 
+
+
+# prepare logger
+def get_logger():
+    watchtower_config = {
+        'log_group': app_config['LOG_GROUP_NAME'],
+        'stream_name': app_config['LOG_STREAM_NAME'],
+        'use_queues': True,
+        'create_log_group': False
+    }
+
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - ' + 
+        task_config['run_id'] + ' - ' + task_config['task_id'] + ' - %(message)s')
+
+    watchtowerlogger = watchtower.CloudWatchLogHandler(**watchtower_config)
+    watchtowerlogger.setFormatter(formatter)
+    logger.addHandler(watchtowerlogger)
+
+    return logger
+
+
+# monitor output from CP process and send to Cloudwatch
+def monitorAndLog(process, logger):
+    while True:
+        output = process.stdout.readline()
+        if output == '' and process.poll() is not None:
+            break
+        if output:
+            print(output.strip())
+            logger.info(output)
 
 # post processing after CellProfiler finish the analysis
 # it does the things below:
@@ -185,14 +202,14 @@ def prepare_for_task(message):
 def upload_result_and_clean_up():
     s3 = boto3.client('s3')
 
-    print(os.listdir(app_config['TASK_OUTPUT_DIR']))
+    logger.info(os.listdir(app_config['TASK_OUTPUT_DIR']))
     upload_result_command = ("aws s3 mv " + app_config['TASK_OUTPUT_DIR'] +
                              " \"s3://" + task_config['run_record_bucket'] +
                              '/' + task_config['task_output_prefix'] +
                              "\" --recursive")
-    print("moving data to S3 with command: \n" + upload_result_command)
+    logger.info("moving data to S3 with command: \n" + upload_result_command)
     os.system(upload_result_command)
-    print(os.listdir(app_config['TASK_OUTPUT_DIR']))
+    logger.info(os.listdir(app_config['TASK_OUTPUT_DIR']))
 
     if len(os.listdir(app_config['TASK_OUTPUT_DIR'])) != 0:
         os.system('rm -r ' + app_config['TASK_OUTPUT_DIR'] + '/*')
@@ -205,7 +222,7 @@ def build_cp_run_command():
     with open(task_config['pipeline_file_local_copy']) as openpipe:
         for line in openpipe:
             if 'DateRevision:2' in line:
-                print('comes from a CP2 pipeline')
+                logger.info('comes from a CP2 pipeline')
                 cmdstem = 'cellprofiler -c -r -b '
                 break
 
@@ -271,7 +288,7 @@ def update_run_status():
     # check if the whole run is done
     # if is_run_finished():
     if True:
-        print(
+        logger.info(
             'All the tasks from this run has been done. prepare for result consolidation.')
         message = build_result_consolidation_message()
         reslut_consolidation_queue = JobQueue(
@@ -302,7 +319,7 @@ def is_run_finished():
     tasks_status = [x['the_status'] for x in response['Items']]
 
     # show the overall status of the run
-    print(dict(Counter(tasks_status)))
+    logger.info(dict(Counter(tasks_status)))
 
     if task_status['SCHEDULED'] in tasks_status:
         return False
